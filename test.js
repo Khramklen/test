@@ -187,26 +187,40 @@ const emails = [
   }
   
 
-const sender = async(emails) => {
-    const result = [];
-    let alreadySend = [];
+const allSettled = async() => {
+  let i = 0;
+  const stuck = [];
+  const result = [];
+  let alreadySend = [];
+  let stepper = 60;
+
     try {
         alreadySend = await readFileToArray('./data.json')
     } catch (error) {}
 
-    for (let i = 0; i < emails.length; i+=60) {
-        const start = new Date();
+    let start = new Date();
+    let successCounter = 0;
+    let errorCounter = 0;
+
+
+    while (i < emails.length) {
         await Promise.allSettled(
-            emails.slice(i, i + 60).map(({fio, email}, index) => {
+            emails.slice(i, i + stepper).map(({fio, email}, index) => {
                 if(alreadySend[index] === 'не отправлено' || !alreadySend[index]) {
-                    return sendEmail(email, fio).then((data) => {
-                        result[index] = fio;
+                  return new Promise((res, rej) => {
+                     sendEmail(email, fio).then((data) => {
+                        result[index] = fio || "клиент";
+                        res(data);
+                        successCounter+= 1;
                     }).catch((error) => {
                         result[index] = error.message;
+                        rej(error);
+                        errorCounter+=1;
                     });
+                  });
                 } else {
                     result[index] = alreadySend[index];
-                    return new Promise((res, rej) => {
+                    return new Promise((res) => {
                         res();
                     });
                 }
@@ -215,12 +229,41 @@ const sender = async(emails) => {
         const end = new Date();
         const dif = (end - start) / 1000;
 
-        //нет уверенности в математике расчета, но схема такая
+        if(errorCounter) {
+          if(end - start < 60000) {
+            stepper = errorCounter;
+            console.log(stepper);
 
-        await new Promise((resolve) => setTimeout(resolve, dif >= 60 ? 0: 60000));
-      
-        
-    }
+          if(successCounter>=60) {
+            await new Promise(
+              (resolve) => 
+              setTimeout(() => {
+                console.log("i am wait --------->", 60 - dif);
+                resolve()
+              }),
+              dif >= 60 ? 0 : (60 - dif) * 1000
+            );
+            stepper = 60;
+            }
+          } else {
+            errorCounter = 0;
+            successCounter = 0;
+          }
+        } else {
+
+        await new Promise(
+          (resolve) =>
+            setTimeout(() => {
+              console.log("i am wait2 --------->", 60 - dif);
+              resolve()
+            }),
+            dif >= 60 ? 0 : (60 - dif) * 1000
+          );
+          stepper = 60;
+          }
+          i += stepper;
+        }
+
     writeArrayToJsonFileSync(result);
-}
-console.log(sender(emails));
+};
+allSettled(emails);
